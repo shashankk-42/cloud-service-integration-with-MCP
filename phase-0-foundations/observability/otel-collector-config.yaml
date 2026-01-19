@@ -1,0 +1,142 @@
+# OpenTelemetry Collector Configuration
+# Phase 0: Observability Bootstrap
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus metrics scraping
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'mcp-servers'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['mcp-aws:8001', 'mcp-azure:8002', 'mcp-gcp:8003']
+          
+        - job_name: 'langgraph-agents'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['orchestrator:8000']
+
+  # Host metrics
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      disk:
+      load:
+      filesystem:
+      memory:
+      network:
+      process:
+        include:
+          match_type: regexp
+          names: ['mcp.*', 'python.*']
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1000
+    spike_limit_mib: 200
+
+  resourcedetection:
+    detectors: [env, system, docker, ec2, gcp, azure]
+    timeout: 5s
+
+  attributes:
+    actions:
+      - key: service.namespace
+        value: cloud-orchestrator
+        action: upsert
+      - key: deployment.environment
+        from_attribute: ENVIRONMENT
+        action: insert
+
+  # Filter out noisy traces
+  filter:
+    error_mode: ignore
+    traces:
+      span:
+        - 'name == "health_check"'
+        - 'attributes["http.target"] == "/health"'
+
+exporters:
+  # OTLP exporter for traces
+  otlp:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: cloud_orchestrator
+    const_labels:
+      service: mcp-platform
+
+  # Loki for logs
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    labels:
+      attributes:
+        service.name: "service_name"
+        severity: "severity"
+      resource:
+        cloud.provider: "cloud_provider"
+        cloud.region: "cloud_region"
+
+  # CloudWatch for AWS
+  awscloudwatchlogs:
+    log_group_name: "/cloud-orchestrator/otel"
+    log_stream_name: "collector"
+    region: "us-east-1"
+
+  # Debug exporter for development
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  
+  pprof:
+    endpoint: 0.0.0.0:1888
+  
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resourcedetection, attributes]
+      exporters: [otlp, debug]
+    
+    metrics:
+      receivers: [otlp, prometheus, hostmetrics]
+      processors: [memory_limiter, batch, resourcedetection]
+      exporters: [prometheus, debug]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resourcedetection, attributes]
+      exporters: [loki, awscloudwatchlogs, debug]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888

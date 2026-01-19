@@ -1,0 +1,227 @@
+# KServe InferenceService for Model Serving
+# Supports canary deployments, auto-scaling, and multi-cloud deployment
+
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: cloud-orchestrator-model
+  namespace: model-serving
+  labels:
+    app: cloud-orchestrator
+    component: inference
+  annotations:
+    sidecar.istio.io/inject: "true"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+spec:
+  predictor:
+    # Minimum replicas for scale-to-zero
+    minReplicas: 0
+    maxReplicas: 10
+    scaleTarget: 1
+    scaleMetric: concurrency
+    
+    # Container configuration
+    containers:
+      - name: kserve-container
+        image: nvcr.io/nvidia/tritonserver:23.12-py3
+        ports:
+          - containerPort: 8080
+            protocol: TCP
+        resources:
+          requests:
+            cpu: "1"
+            memory: "4Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+        env:
+          - name: MODEL_NAME
+            value: "cloud-orchestrator-model"
+          - name: STORAGE_URI
+            value: "s3://models/cloud-orchestrator/"
+        volumeMounts:
+          - name: model-cache
+            mountPath: /mnt/models
+        livenessProbe:
+          httpGet:
+            path: /v2/health/live
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /v2/health/ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+    
+    # Canary configuration
+    canaryTrafficPercent: 0
+    
+    # Tolerations for GPU nodes
+    tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+    
+    # Node selector for specific instance types
+    nodeSelector:
+      cloud.orchestrator/gpu-type: "nvidia-t4"
+    
+    volumes:
+      - name: model-cache
+        emptyDir:
+          sizeLimit: 10Gi
+
+---
+# Canary InferenceService for A/B testing
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: cloud-orchestrator-model-canary
+  namespace: model-serving
+  labels:
+    app: cloud-orchestrator
+    component: inference-canary
+spec:
+  predictor:
+    minReplicas: 0
+    maxReplicas: 5
+    
+    containers:
+      - name: kserve-container
+        image: nvcr.io/nvidia/tritonserver:23.12-py3
+        resources:
+          requests:
+            cpu: "1"
+            memory: "4Gi"
+          limits:
+            cpu: "2"
+            memory: "8Gi"
+        env:
+          - name: MODEL_NAME
+            value: "cloud-orchestrator-model-v2"
+          - name: STORAGE_URI
+            value: "s3://models/cloud-orchestrator-canary/"
+
+---
+# HPA for fine-grained scaling
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: model-serving-hpa
+  namespace: model-serving
+spec:
+  scaleTargetRef:
+    apiVersion: serving.kserve.io/v1beta1
+    kind: InferenceService
+    name: cloud-orchestrator-model
+  minReplicas: 1
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    # Custom latency metric
+    - type: Pods
+      pods:
+        metric:
+          name: inference_latency_p95
+        target:
+          type: AverageValue
+          averageValue: "100m"  # 100ms target
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+
+---
+# KEDA ScaledObject for event-driven scaling
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: model-serving-keda
+  namespace: model-serving
+spec:
+  scaleTargetRef:
+    apiVersion: serving.kserve.io/v1beta1
+    kind: InferenceService
+    name: cloud-orchestrator-model
+  pollingInterval: 15
+  cooldownPeriod: 300
+  minReplicaCount: 0
+  maxReplicaCount: 20
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    # Scale based on Prometheus metrics
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus:9090
+        metricName: inference_request_rate
+        threshold: "100"
+        query: |
+          sum(rate(inference_requests_total{service="cloud-orchestrator-model"}[2m]))
+    # Scale based on Kafka queue depth
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: model-inference
+        topic: inference-requests
+        lagThreshold: "100"
+
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: model-serving-pdb
+  namespace: model-serving
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: cloud-orchestrator
+      component: inference
+
+---
+# ServiceMonitor for Prometheus
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: model-serving-monitor
+  namespace: model-serving
+spec:
+  selector:
+    matchLabels:
+      app: cloud-orchestrator
+  endpoints:
+    - port: http
+      interval: 15s
+      path: /metrics

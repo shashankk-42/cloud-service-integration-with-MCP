@@ -1,0 +1,183 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: '3.11'
+  AWS_REGION: us-east-1
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff mypy black isort
+
+      - name: Run linters
+        run: |
+          ruff check .
+          black --check .
+          isort --check-only .
+
+      - name: Run type checking
+        run: |
+          mypy --install-types --non-interactive .
+        continue-on-error: true
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v --cov=. --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Run Bandit security linter
+        run: |
+          pip install bandit
+          bandit -r . -ll
+
+  build-mcp-servers:
+    needs: [lint-and-test, security-scan]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cloud: [aws, azure, gcp]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build MCP Server Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./phase-1-mcp-core/servers/${{ matrix.cloud }}
+          push: false
+          tags: mcp-server-${{ matrix.cloud }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  integration-tests:
+    needs: [build-mcp-servers]
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        image: localstack/localstack:latest
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: ec2,s3,sagemaker,sts,secretsmanager
+
+      postgres:
+        image: postgres:15
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: cloud_orchestrator_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for services
+        run: |
+          sleep 10
+          curl -s http://localhost:4566/_localstack/health | jq
+
+      - name: Run integration tests
+        env:
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          DATABASE_URL: postgresql://test:test@localhost:5432/cloud_orchestrator_test
+        run: |
+          pytest tests/integration/ -v --tb=short
+
+  deploy-sandbox:
+    needs: [integration-tests]
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment: sandbox
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to EKS
+        run: |
+          aws eks update-kubeconfig --name cloud-orchestrator-sandbox
+          kubectl apply -k ./k8s/overlays/sandbox
+
+  deploy-production:
+    needs: [integration-tests]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Manual approval gate
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: platform-team
+          minimum-approvals: 2
+
+      - name: Deploy to Production
+        run: |
+          echo "Production deployment requires additional approvals"

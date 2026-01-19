@@ -1,0 +1,79 @@
+# MCP Server Dockerfile
+# Multi-stage build for Cloud Provider MCP Servers
+
+FROM python:3.11-slim as builder
+
+# Build arguments
+ARG CLOUD_PROVIDER=aws
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy and install requirements
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Production stage
+FROM python:3.11-slim as production
+
+# Labels
+LABEL maintainer="Cloud Platform Team"
+LABEL version="1.0.0"
+LABEL description="MCP Server for Cloud Service Integration"
+
+# Build arguments
+ARG CLOUD_PROVIDER=aws
+ENV CLOUD_PROVIDER=${CLOUD_PROVIDER}
+
+# Create non-root user
+RUN groupadd -r mcpuser && useradd -r -g mcpuser mcpuser
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY --chown=mcpuser:mcpuser phase_1_mcp_core/ ./phase_1_mcp_core/
+COPY --chown=mcpuser:mcpuser shared/ ./shared/
+
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+echo "Starting MCP Server for ${CLOUD_PROVIDER}..."\n\
+exec python -m phase_1_mcp_core.servers.${CLOUD_PROVIDER}.${CLOUD_PROVIDER}_server "$@"\n\
+' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Switch to non-root user
+USER mcpuser
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV LOG_LEVEL=INFO
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Entry point
+ENTRYPOINT ["/app/entrypoint.sh"]

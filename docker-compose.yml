@@ -1,0 +1,309 @@
+# Docker Compose for Local Development
+# Cloud Service Integration with MCP
+# ==================================
+
+version: '3.8'
+
+services:
+  # ===================
+  # MCP Servers
+  # ===================
+  
+  mcp-aws:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mcp
+      args:
+        CLOUD_PROVIDER: aws
+    container_name: mcp-aws
+    ports:
+      - "8001:8000"
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-test}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-test}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - LOG_LEVEL=INFO
+    depends_on:
+      - localstack
+      - postgres
+      - redis
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mcp-azure:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mcp
+      args:
+        CLOUD_PROVIDER: azure
+    container_name: mcp-azure
+    ports:
+      - "8002:8000"
+    environment:
+      - AZURE_SUBSCRIPTION_ID=${AZURE_SUBSCRIPTION_ID:-test}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID:-test}
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID:-test}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET:-test}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - LOG_LEVEL=INFO
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mcp-gcp:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mcp
+      args:
+        CLOUD_PROVIDER: gcp
+    container_name: mcp-gcp
+    ports:
+      - "8003:8000"
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/gcp-key.json
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID:-test-project}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./credentials:/app/credentials:ro
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===================
+  # LangGraph Orchestrator
+  # ===================
+  
+  orchestrator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.orchestrator
+    container_name: orchestrator
+    ports:
+      - "8080:8080"
+    environment:
+      - MCP_AWS_URL=http://mcp-aws:8000
+      - MCP_AZURE_URL=http://mcp-azure:8000
+      - MCP_GCP_URL=http://mcp-gcp:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/orchestrator
+      - REDIS_URL=redis://redis:6379/0
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OPA_URL=http://opa:8181
+      - LOG_LEVEL=INFO
+    depends_on:
+      mcp-aws:
+        condition: service_healthy
+      mcp-azure:
+        condition: service_healthy
+      mcp-gcp:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opa:
+        condition: service_started
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===================
+  # Infrastructure Services
+  # ===================
+  
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=orchestrator
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ===================
+  # LocalStack (AWS Emulator)
+  # ===================
+  
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    ports:
+      - "4566:4566"  # LocalStack edge port
+      - "4510-4559:4510-4559"  # Service ports
+    environment:
+      - SERVICES=ec2,s3,eks,iam,sagemaker,lambda,dynamodb,sqs,sns,cloudwatch,budgets
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - localstack_data:/tmp/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - mcp-network
+
+  # ===================
+  # Policy Engine (OPA)
+  # ===================
+  
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: opa
+    ports:
+      - "8181:8181"
+    command:
+      - "run"
+      - "--server"
+      - "--log-level=info"
+      - "/policies"
+    volumes:
+      - ./phase-5-security-compliance/policies:/policies:ro
+    networks:
+      - mcp-network
+
+  # ===================
+  # Observability Stack
+  # ===================
+  
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Prometheus metrics
+      - "8889:8889"   # Prometheus exporter
+    volumes:
+      - ./phase-0-foundations/observability/otel-collector-config.yaml:/etc/otel/config.yaml
+    command: ["--config", "/etc/otel/config.yaml"]
+    networks:
+      - mcp-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - mcp-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - mcp-network
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - mcp-network
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"  # UI
+      - "14268:14268"  # HTTP collector
+      - "14250:14250"  # gRPC collector
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - mcp-network
+
+# ===================
+# Networks
+# ===================
+
+networks:
+  mcp-network:
+    driver: bridge
+    name: mcp-network
+
+# ===================
+# Volumes
+# ===================
+
+volumes:
+  postgres_data:
+  redis_data:
+  localstack_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:

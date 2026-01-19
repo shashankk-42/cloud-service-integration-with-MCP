@@ -1,0 +1,125 @@
+# LangGraph Orchestrator Dockerfile
+# Multi-stage build for the AI Orchestration Engine
+
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy and install requirements
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Production stage
+FROM python:3.11-slim as production
+
+# Labels
+LABEL maintainer="Cloud Platform Team"
+LABEL version="1.0.0"
+LABEL description="LangGraph Orchestrator for Multi-Cloud AI Operations"
+
+# Create non-root user
+RUN groupadd -r orchestrator && useradd -r -g orchestrator orchestrator
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY --chown=orchestrator:orchestrator phase_2_langgraph_orchestrator/ ./phase_2_langgraph_orchestrator/
+COPY --chown=orchestrator:orchestrator phase_4_cost_resilience/ ./phase_4_cost_resilience/
+COPY --chown=orchestrator:orchestrator shared/ ./shared/
+
+# Create API server script
+RUN echo '#!/usr/bin/env python\n\
+import asyncio\n\
+import os\n\
+from fastapi import FastAPI, HTTPException\n\
+from pydantic import BaseModel\n\
+from typing import Optional, Dict, Any, List\n\
+import uvicorn\n\
+\n\
+from phase_2_langgraph_orchestrator.workflow import CloudOrchestrator\n\
+from phase_2_langgraph_orchestrator.state import TaskRequest, WorkloadType\n\
+\n\
+app = FastAPI(\n\
+    title="Cloud Orchestrator API",\n\
+    description="Multi-cloud AI workload orchestration",\n\
+    version="1.0.0"\n\
+)\n\
+\n\
+orchestrator = CloudOrchestrator()\n\
+\n\
+class TaskSubmission(BaseModel):\n\
+    name: str\n\
+    description: str\n\
+    workload_type: str\n\
+    resource_requirements: Optional[Dict[str, Any]] = None\n\
+    slo_requirements: Optional[Dict[str, Any]] = None\n\
+    budget_limit: float = 0.0\n\
+    preferred_clouds: List[str] = []\n\
+\n\
+@app.get("/health")\n\
+async def health():\n\
+    return {"status": "healthy"}\n\
+\n\
+@app.post("/tasks")\n\
+async def submit_task(task: TaskSubmission):\n\
+    task_request = TaskRequest(\n\
+        name=task.name,\n\
+        description=task.description,\n\
+        workload_type=WorkloadType(task.workload_type),\n\
+        resource_requirements=task.resource_requirements or {},\n\
+        slo_requirements=task.slo_requirements or {},\n\
+        budget_limit=task.budget_limit,\n\
+        preferred_clouds=task.preferred_clouds\n\
+    )\n\
+    result = await orchestrator.run(task_request)\n\
+    return result\n\
+\n\
+@app.get("/tasks/{task_id}")\n\
+async def get_task_status(task_id: str):\n\
+    status = await orchestrator.get_workflow_status(task_id)\n\
+    if not status:\n\
+        raise HTTPException(status_code=404, detail="Task not found")\n\
+    return status\n\
+\n\
+if __name__ == "__main__":\n\
+    uvicorn.run(app, host="0.0.0.0", port=8080)\n\
+' > /app/server.py && chown orchestrator:orchestrator /app/server.py
+
+# Switch to non-root user
+USER orchestrator
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV LOG_LEVEL=INFO
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Expose port
+EXPOSE 8080
+
+# Entry point
+CMD ["python", "/app/server.py"]

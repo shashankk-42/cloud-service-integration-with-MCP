@@ -1,0 +1,6 @@
+phase_1_mcp_core
+phase_2_langgraph_orchestrator
+phase_3_model_serving
+phase_4_cost_resilience
+phase_5_security_compliance
+shared
