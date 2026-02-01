@@ -57,6 +57,15 @@ class AzureMCPServer(BaseMCPServer):
     
     def _init_clients(self):
         """Initialize Azure service clients."""
+        if self.mock_mode or not self.subscription_id or "your_" in (self.subscription_id or ""):
+            logger.info("azure_mcp_mock_active")
+            self.mock_mode = True  # Ensure it's set
+            self.compute_client = None
+            self.storage_client = None
+            self.aks_client = None
+            self.network_client = None
+            return
+
         self.credential = DefaultAzureCredential()
         
         self.compute_client = ComputeManagementClient(

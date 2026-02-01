@@ -5,12 +5,24 @@ Contains the Planner, Allocator, Executor, Verifier, and Finisher agents.
 
 import asyncio
 import json
+import socket
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+# ============== IPv4 Workaround ==============
+# Force IPv4 to avoid DNS/IPv6 issues with aiohttp
+_original_getaddrinfo = socket.getaddrinfo
+
+def _getaddrinfo_ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
+    return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+socket.getaddrinfo = _getaddrinfo_ipv4_only
+# ============================================
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 import structlog
 
@@ -37,10 +49,38 @@ class MCPClientManager:
     async def get_client(self, cloud: CloudProvider):
         """Get or create MCP client for a cloud provider."""
         if cloud.value not in self.clients:
-            # Initialize MCP client connection
-            from mcp import ClientSession
-            # Client initialization would happen here
-            pass
+            # Initialize MCP client connection via SSE
+            from mcp.client.sse import sse_client
+            
+            # Get endpoint from config (e.g. http://localhost:8001)
+            endpoint = self.config.get(cloud.value, {}).get("endpoint")
+            if not endpoint:
+                logger.warning("mcp_endpoint_not_configured", cloud=cloud.value)
+                return None
+            
+            logger.info("connecting_to_mcp_server", cloud=cloud.value, endpoint=endpoint)
+            
+            try:
+                # We need to maintain the context manager for the session
+                # For simplicity in this manager, we'll store the session itself
+                # In a production app, we'd manage the lifecycle more robustly
+                self._cm = sse_client(url=f"{endpoint}/sse")
+                read_stream, write_stream = await self._cm.__aenter__()
+                
+                from mcp import ClientSession
+                session = ClientSession(read_stream, write_stream)
+                await session.__aenter__()
+                
+                # Initialize session
+                await session.initialize()
+                
+                self.clients[cloud.value] = session
+                logger.info("mcp_client_connected", cloud=cloud.value)
+                
+            except Exception as e:
+                logger.error("mcp_connection_failed", cloud=cloud.value, error=str(e))
+                return None
+                
         return self.clients.get(cloud.value)
     
     async def call_tool(
@@ -75,7 +115,7 @@ class BaseAgent:
         llm: Optional[Any] = None
     ):
         self.mcp = mcp_manager
-        self.llm = llm or ChatOpenAI(model="gpt-4-turbo-preview", temperature=0)
+        self.llm = llm or ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
     
     def _record_decision(
         self,
@@ -188,8 +228,13 @@ Data Residency: {task.get('data_residency_requirements', ['none'])}
             )
             
         except Exception as e:
-            logger.error("planner_error", error=str(e))
-            state["errors"] = state.get("errors", []) + [f"Planner error: {str(e)}"]
+            if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
+                logger.warning("planner_rate_limit_hit", detail="Gemini API Quota exceeded. Using safe defaults for demo.")
+                state["errors"] = state.get("errors", []) + ["Planner fallback: Gemini API rate limit hit. Using default plan."]
+            else:
+                logger.error("planner_error", error=str(e))
+                state["errors"] = state.get("errors", []) + [f"Planner error: {str(e)}"]
+            
             # Fallback to defaults
             state["workload_classification"] = {
                 "type": task.get("workload_type", "batch"),

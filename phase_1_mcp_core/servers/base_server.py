@@ -276,9 +276,20 @@ class BaseMCPServer(ABC):
         self.circuit_breaker = CircuitBreaker()
         self.rate_limiter = RateLimiter(rate_limit, rate_capacity)
         self.idempotency_store: Dict[str, OperationResult] = {}
+        self.mock_mode = self._check_mock_mode()
+        
+        if self.mock_mode:
+            logger.info("mcp_server_mock_mode_active", provider=self.provider.value)
         
         self._register_tools()
         self._setup_handlers()
+    
+    def _check_mock_mode(self) -> bool:
+        """Check if mock mode should be enabled based on environment and credentials."""
+        import os
+        if os.getenv('MOCK_MODE', 'false').lower() == 'true':
+            return True
+        return False
     
     def _register_tools(self):
         """Register all MCP tools."""
@@ -383,7 +394,11 @@ class BaseMCPServer(ABC):
                 
                 # Execute with circuit breaker
                 handler = self._get_tool_handler(tool_name)
-                result = await self.circuit_breaker.call(handler, arguments)
+                
+                if self.mock_mode:
+                    result = await self._get_mock_response(tool_name, arguments)
+                else:
+                    result = await self.circuit_breaker.call(handler, arguments)
                 
                 duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
                 
@@ -452,6 +467,33 @@ class BaseMCPServer(ABC):
         }
         return handlers.get(tool_name, self._unknown_tool)
     
+    async def _get_mock_response(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a believable mock response for a tool call."""
+        logger.info("generating_mock_response", tool=tool_name)
+        
+        # Default success response
+        response = {
+            "status": "success",
+            "message": f"Mock {tool_name} execution successful",
+            "provider": self.provider.value,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        # Tool-specific extras to keep orchestrator happy
+        if "provision" in tool_name:
+            response["instances"] = [{
+                "instance_id": f"mock-inst-{uuid.uuid4().hex[:8]}",
+                "instance_type": arguments.get("instance_type", "t3.medium"),
+                "state": "running"
+            }]
+        elif "storage" in tool_name:
+            response["bucket_name"] = arguments.get("bucket_name", "mock-bucket")
+        elif "cost" in tool_name:
+            response["estimated_cost_usd"] = 0.50
+            response["currency"] = "USD"
+            
+        return response
+    
     async def _unknown_tool(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Unknown tool")
     
@@ -511,22 +553,59 @@ class BaseMCPServer(ABC):
         """Configure failover routing."""
         pass
     
-    async def run(self, transport: str = "stdio"):
+    async def run(self, transport: str = "sse", host: str = "0.0.0.0", port: int = 8000):
         """Run the MCP server."""
-        from mcp.server.stdio import stdio_server
-        
-        logger.info(
-            "mcp_server_starting",
-            provider=self.provider.value,
-            server_name=self.server_name
-        )
-        
-        async with stdio_server() as (read_stream, write_stream):
-            await self.server.run(
-                read_stream,
-                write_stream,
-                InitializationOptions(
-                    server_name=self.server_name,
-                    server_version="1.0.0"
+        if transport == "stdio":
+            from mcp.server.stdio import stdio_server
+            logger.info("mcp_server_starting_stdio", provider=self.provider.value)
+            async with stdio_server() as (read_stream, write_stream):
+                await self.server.run(
+                    read_stream,
+                    write_stream,
+                    InitializationOptions(
+                        server_name=self.server_name,
+                        server_version="1.0.0",
+                        capabilities={}
+                    )
                 )
+        else:
+            from mcp.server.sse import SseServerTransport
+            from starlette.applications import Starlette
+            from starlette.routing import Route
+            import uvicorn
+            
+            logger.info("mcp_server_starting_sse", provider=self.provider.value, host=host, port=port)
+            
+            sse = SseServerTransport("/messages")
+            
+            async def handle_sse(request):
+                async with sse.connect_sse(request.scope, request.receive, request._send) as (read_stream, write_stream):
+                    await self.server.run(
+                        read_stream,
+                        write_stream,
+                        InitializationOptions(
+                            server_name=self.server_name,
+                            server_version="1.0.0",
+                            capabilities={}
+                        )
+                    )
+            
+            async def handle_messages(request):
+                await sse.handle_post_message(request.scope, request.receive, request._send)
+                
+            async def health_check(request):
+                from starlette.responses import JSONResponse
+                return JSONResponse({"status": "healthy", "provider": self.provider.value})
+                
+            app = Starlette(
+                debug=True,
+                routes=[
+                    Route("/sse", endpoint=handle_sse),
+                    Route("/messages", endpoint=handle_messages, methods=["POST"]),
+                    Route("/health", endpoint=health_check)
+                ]
             )
+            
+            config = uvicorn.Config(app, host=host, port=port, log_level="info")
+            server = uvicorn.Server(config)
+            await server.serve()

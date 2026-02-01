@@ -62,6 +62,20 @@ class AWSMCPServer(BaseMCPServer):
     
     def _init_clients(self):
         """Initialize AWS service clients."""
+        if self.mock_mode:
+            logger.info("aws_mcp_mock_active")
+            self.ec2 = None
+            self.s3 = None
+            self.eks = None
+            self.sagemaker = None
+            self.sts = None
+            self.secretsmanager = None
+            self.route53 = None
+            self.pricing = None
+            self.service_quotas = None
+            self.autoscaling = None
+            return
+
         client_kwargs = {
             'config': self.boto_config
         }

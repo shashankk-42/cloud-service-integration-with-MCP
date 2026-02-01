@@ -304,7 +304,7 @@ async def main():
     
     load_dotenv()
     
-    # Initialize orchestrator
+    # Initialize orchestrator (using in-memory state store, no database required)
     orchestrator = CloudOrchestrator(
         mcp_config={
             "aws": {
@@ -317,7 +317,7 @@ async def main():
                 "endpoint": os.getenv("MCP_GCP_ENDPOINT", "http://localhost:8003")
             }
         },
-        database_url=os.getenv("DATABASE_URL")
+        database_url=None  # Use in-memory state store
     )
     
     # Example: Run a batch job

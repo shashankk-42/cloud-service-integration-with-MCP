@@ -1,0 +1,135 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.10.11, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\Nubaid\AppData\Local\Programs\Python\Python310\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Nubaid\OneDrive\Desktop\AL\cloud-service-integration-with-MCP-main
+configfile: pytest.ini (WARNING: ignoring pytest config in pyproject.toml!)
+plugins: anyio-4.9.0, langsmith-0.6.4, asyncio-1.3.0, cov-7.0.0, httpx-0.36.0
+asyncio: mode=auto, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 21 items
+
+tests/unit/test_components.py::TestCircuitBreaker::test_circuit_closed_initially FAILED [  4%]
+tests/unit/test_components.py::TestCircuitBreaker::test_circuit_opens_after_failures FAILED [  9%]
+tests/unit/test_components.py::TestCircuitBreaker::test_circuit_half_open_after_timeout FAILED [ 14%]
+tests/unit/test_components.py::TestCircuitBreaker::test_circuit_closes_on_success FAILED [ 19%]
+tests/unit/test_components.py::TestRateLimiter::test_rate_limiter_allows_within_limit FAILED [ 23%]
+tests/unit/test_components.py::TestRateLimiter::test_rate_limiter_blocks_excess FAILED [ 28%]
+tests/unit/test_components.py::TestOrchestratorState::test_state_initialization PASSED [ 33%]
+tests/unit/test_components.py::TestOrchestratorState::test_task_request_defaults FAILED [ 38%]
+tests/unit/test_components.py::TestOrchestratorState::test_state_persistence_inmemory FAILED [ 42%]
+tests/unit/test_components.py::TestPlannerAgent::test_planner_creates_valid_plan FAILED [ 47%]
+tests/unit/test_components.py::TestAllocatorAgent::test_allocator_respects_budget FAILED [ 52%]
+tests/unit/test_components.py::TestAllocatorAgent::test_allocator_respects_cloud_preference FAILED [ 57%]
+tests/unit/test_components.py::TestVerifierAgent::test_verifier_detects_failures FAILED [ 61%]
+tests/unit/test_components.py::TestVerifierAgent::test_verifier_recommends_rollback FAILED [ 66%]
+tests/unit/test_components.py::TestCostCalculations::test_spot_savings_calculation PASSED [ 71%]
+tests/unit/test_components.py::TestCostCalculations::test_monthly_cost_projection PASSED [ 76%]
+tests/unit/test_components.py::TestConfigValidation::test_cloud_config_validation PASSED [ 80%]
+tests/unit/test_components.py::TestConfigValidation::test_security_config_defaults PASSED [ 85%]
+tests/unit/test_components.py::TestConfigValidation::test_feature_flags FAILED [ 90%]
+tests/unit/test_components.py::TestDataClasses::test_task_request_to_dict FAILED [ 95%]
+tests/unit/test_components.py::TestDataClasses::test_task_request_from_dict FAILED [100%]
+
+================================== FAILURES ===================================
+______________ TestCircuitBreaker.test_circuit_closed_initially _______________
+tests\unit\test_components.py:21: in test_circuit_closed_initially
+    assert cb.failure_count == 0
+E   AttributeError: 'CircuitBreaker' object has no attribute 'failure_count'
+____________ TestCircuitBreaker.test_circuit_opens_after_failures _____________
+tests\unit\test_components.py:30: in test_circuit_opens_after_failures
+    cb.record_failure()
+E   AttributeError: 'CircuitBreaker' object has no attribute 'record_failure'
+___________ TestCircuitBreaker.test_circuit_half_open_after_timeout ___________
+tests\unit\test_components.py:41: in test_circuit_half_open_after_timeout
+    cb.record_failure()
+E   AttributeError: 'CircuitBreaker' object has no attribute 'record_failure'
+______________ TestCircuitBreaker.test_circuit_closes_on_success ______________
+tests\unit\test_components.py:57: in test_circuit_closes_on_success
+    cb.record_failure()
+E   AttributeError: 'CircuitBreaker' object has no attribute 'record_failure'
+____________ TestRateLimiter.test_rate_limiter_allows_within_limit ____________
+tests\unit\test_components.py:76: in test_rate_limiter_allows_within_limit
+    rl = RateLimiter(requests_per_second=10)
+E   TypeError: RateLimiter.__init__() got an unexpected keyword argument 'requests_per_second'
+_______________ TestRateLimiter.test_rate_limiter_blocks_excess _______________
+tests\unit\test_components.py:88: in test_rate_limiter_blocks_excess
+    rl = RateLimiter(requests_per_second=5)
+E   TypeError: RateLimiter.__init__() got an unexpected keyword argument 'requests_per_second'
+______________ TestOrchestratorState.test_task_request_defaults _______________
+tests\unit\test_components.py:141: in test_task_request_defaults
+    workload_type=WorkloadType.TRAINING
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\enum.py:437: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: TRAINING
+____________ TestOrchestratorState.test_state_persistence_inmemory ____________
+tests\unit\test_components.py:152: in test_state_persistence_inmemory
+    from phase_2_langgraph_orchestrator.state import (
+E   ImportError: cannot import name 'InMemoryStatePersistence' from 'phase_2_langgraph_orchestrator.state' (C:\Users\Nubaid\OneDrive\Desktop\AL\cloud-service-integration-with-MCP-main\phase_2_langgraph_orchestrator\state.py)
+______________ TestPlannerAgent.test_planner_creates_valid_plan _______________
+tests\unit\test_components.py:214: in test_planner_creates_valid_plan
+    planner = PlannerAgent()
+E   TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+______________ TestAllocatorAgent.test_allocator_respects_budget ______________
+tests\unit\test_components.py:236: in test_allocator_respects_budget
+    allocator = AllocatorAgent()
+E   TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+_________ TestAllocatorAgent.test_allocator_respects_cloud_preference _________
+tests\unit\test_components.py:257: in test_allocator_respects_cloud_preference
+    allocator = AllocatorAgent()
+E   TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+______________ TestVerifierAgent.test_verifier_detects_failures _______________
+tests\unit\test_components.py:280: in test_verifier_detects_failures
+    verifier = VerifierAgent()
+E   TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+_____________ TestVerifierAgent.test_verifier_recommends_rollback _____________
+tests\unit\test_components.py:298: in test_verifier_recommends_rollback
+    verifier = VerifierAgent()
+E   TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+___________________ TestConfigValidation.test_feature_flags ___________________
+tests\unit\test_components.py:379: in test_feature_flags
+    assert flags.enable_auto_scaling == False
+E   assert True == False
+E    +  where True = FeatureFlags(enable_spot_instances=True, enable_cross_cloud_arbitrage=True, enable_auto_scaling=True, enable_multi_cloud=True, enable_canary_deployments=True, enable_cost_optimization=True).enable_auto_scaling
+__________________ TestDataClasses.test_task_request_to_dict __________________
+tests\unit\test_components.py:392: in test_task_request_to_dict
+    workload_type=WorkloadType.TRAINING,
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\enum.py:437: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: TRAINING
+_________________ TestDataClasses.test_task_request_from_dict _________________
+tests\unit\test_components.py:414: in test_task_request_from_dict
+    task = TaskRequest.from_dict(data)
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\pydantic\_internal\_model_construction.py:271: in __getattr__
+    raise AttributeError(item)
+E   AttributeError: from_dict
+============================== warnings summary ===============================
+tests/unit/test_components.py::TestConfigValidation::test_cloud_config_validation
+tests/unit/test_components.py::TestConfigValidation::test_cloud_config_validation
+tests/unit/test_components.py::TestConfigValidation::test_cloud_config_validation
+tests/unit/test_components.py::TestConfigValidation::test_cloud_config_validation
+tests/unit/test_components.py::TestConfigValidation::test_cloud_config_validation
+tests/unit/test_components.py::TestConfigValidation::test_cloud_config_validation
+tests/unit/test_components.py::TestConfigValidation::test_cloud_config_validation
+tests/unit/test_components.py::TestConfigValidation::test_cloud_config_validation
+  C:\Users\Nubaid\AppData\Local\Programs\Python\Python310\lib\site-packages\pydantic\_internal\_config.py:323: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_components.py::TestCircuitBreaker::test_circuit_closed_initially - AttributeError: 'CircuitBreaker' object has no attribute 'failure_count'
+FAILED tests/unit/test_components.py::TestCircuitBreaker::test_circuit_opens_after_failures - AttributeError: 'CircuitBreaker' object has no attribute 'record_failure'
+FAILED tests/unit/test_components.py::TestCircuitBreaker::test_circuit_half_open_after_timeout - AttributeError: 'CircuitBreaker' object has no attribute 'record_failure'
+FAILED tests/unit/test_components.py::TestCircuitBreaker::test_circuit_closes_on_success - AttributeError: 'CircuitBreaker' object has no attribute 'record_failure'
+FAILED tests/unit/test_components.py::TestRateLimiter::test_rate_limiter_allows_within_limit - TypeError: RateLimiter.__init__() got an unexpected keyword argument 'requests_per_second'
+FAILED tests/unit/test_components.py::TestRateLimiter::test_rate_limiter_blocks_excess - TypeError: RateLimiter.__init__() got an unexpected keyword argument 'requests_per_second'
+FAILED tests/unit/test_components.py::TestOrchestratorState::test_task_request_defaults - AttributeError: TRAINING
+FAILED tests/unit/test_components.py::TestOrchestratorState::test_state_persistence_inmemory - ImportError: cannot import name 'InMemoryStatePersistence' from 'phase_2_langgraph_orchestrator.state' (C:\Users\Nubaid\OneDrive\Desktop\AL\cloud-service-integration-with-MCP-main\phase_2_langgraph_orchestrator\state.py)
+FAILED tests/unit/test_components.py::TestPlannerAgent::test_planner_creates_valid_plan - TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+FAILED tests/unit/test_components.py::TestAllocatorAgent::test_allocator_respects_budget - TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+FAILED tests/unit/test_components.py::TestAllocatorAgent::test_allocator_respects_cloud_preference - TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+FAILED tests/unit/test_components.py::TestVerifierAgent::test_verifier_detects_failures - TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+FAILED tests/unit/test_components.py::TestVerifierAgent::test_verifier_recommends_rollback - TypeError: BaseAgent.__init__() missing 1 required positional argument: 'mcp_manager'
+FAILED tests/unit/test_components.py::TestConfigValidation::test_feature_flags - assert True == False
+ +  where True = FeatureFlags(enable_spot_instances=True, enable_cross_cloud_arbitrage=True, enable_auto_scaling=True, enable_multi_cloud=True, enable_canary_deployments=True, enable_cost_optimization=True).enable_auto_scaling
+FAILED tests/unit/test_components.py::TestDataClasses::test_task_request_to_dict - AttributeError: TRAINING
+FAILED tests/unit/test_components.py::TestDataClasses::test_task_request_from_dict - AttributeError: from_dict
+================== 16 failed, 5 passed, 8 warnings in 5.77s ===================

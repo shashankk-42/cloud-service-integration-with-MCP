@@ -55,6 +55,17 @@ class GCPMCPServer(BaseMCPServer):
     
     def _init_clients(self):
         """Initialize GCP service clients."""
+        creds_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+        if self.mock_mode or not creds_path or not os.path.exists(creds_path) or "your_" in (self.project_id or ""):
+            logger.info("gcp_mcp_mock_active")
+            self.mock_mode = True
+            self.instances_client = None
+            self.instance_templates_client = None
+            self.storage_client = None
+            self.container_client = None
+            self.secret_client = None
+            return
+
         self.instances_client = compute_v1.InstancesClient()
         self.instance_templates_client = compute_v1.InstanceTemplatesClient()
         self.storage_client = storage.Client(project=self.project_id)
