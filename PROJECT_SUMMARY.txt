@@ -1,0 +1,64 @@
+================================================================================
+PROJECT TECHNICAL SPECIFICATIONS & BUILD SUMMARY
+================================================================================
+
+1. CORE COMPONENTS & NETWORK PORTS
+----------------------------------
+The environment consists of a 14-container Docker stack:
+
+SERVICE          PORT    ROLE
+--------------------------------------------------------------------------------
+Orchestrator     8000    LangGraph workflow manager (The Brain)
+mcp-aws          8001    AWS Interface (SSE Transport)
+mcp-azure        8002    Azure Interface (SSE Transport)
+mcp-gcp          8003    GCP Interface (SSE Transport)
+Postgres         5432    Persistent state and audit store
+Redis            6379    Message caching and coordination
+LocalStack       4566    AWS Emulator (S3, EC2, EKS mocks)
+Prometheus       9090    Performance monitoring and metrics
+Grafana          3000    Infrastructure visualization dashboard
+Jaeger           16686   Distributed tracing (Trace Every Decision)
+--------------------------------------------------------------------------------
+
+2. KEY TECHNICAL FIXES (THE "STABILITY" BUILD)
+---------------------------------------------
+During the development phase, the following critical issues were resolved to 
+ensure the system is demo-ready:
+
+- MCP Persistence Fix: Switched from "stdio" to "SSE" (HTTP) transport. This 
+  allows MCP servers to stay alive in Docker containers indefinitely.
+- Missing SDKs: Added `azure-mgmt-containerservice`, `google-cloud-container`, 
+  and other missing cloud SDKs to the Docker image build process.
+- Rate Limit Resilience: Implemented automatic fallbacks for Gemini 429 errors 
+  (RESOURCE_EXHAUSTED). The system now provides a "Plan B" if the API is busy.
+- Protocol Alignment: Fixed a Pydantic validation error in the MCP Base Server 
+  by correcting the `InitializationOptions` structure (added missing capabilities).
+
+3. HOW IT WAS BUILT
+-------------------
+- Infrastructure as Code: Defined the entire multi-cloud environment in a 
+  single `docker-compose.yml`.
+- Multi-Stage Docker Builds: Used multi-stage `Dockerfile.mcp` to keep container 
+  images small and efficient.
+- Stateful Logic: Used LangGraph to manage the 5-stage orchestration pipeline. 
+  This allows the system to remember what happened in the "Planning" stage 
+  when it's in the "Verification" stage.
+- Real-Time Integration: Integrated `ChatGoogleGenerativeAI` (Gemini 2.0) for 
+  live, intelligent infrastructure planning.
+
+4. OPERATIONAL MODES
+-------------------
+- MOCK_MODE=true: (Currently active) Cloud servers return simulated success 
+  responses. This allows for a full horizontal demo without real cloud costs.
+- REAL_TIME: By setting `MOCK_MODE=false` and adding real keys to `.env`, the 
+  system immediately starts talking to real AWS, Azure, and GCP accounts.
+
+5. VERIFICATION COMMANDS
+------------------------
+- Health Check: `Invoke-WebRequest http://localhost:8001/health`
+- Run Demo: `python -m phase_2_langgraph_orchestrator`
+- Check Logs: `docker logs mcp-aws` or `docker logs orchestrator`
+
+================================================================================
+END OF SPECIFICATIONS
+================================================================================

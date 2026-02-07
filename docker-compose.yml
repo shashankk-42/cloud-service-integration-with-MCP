@@ -8,7 +8,7 @@ services:
   # ===================
   # MCP Servers
   # ===================
-  
+
   mcp-aws:
     build:
       context: .
@@ -25,6 +25,7 @@ services:
       - AWS_ENDPOINT_URL=http://localstack:4566
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - LOG_LEVEL=INFO
+      - MOCK_MODE=true
     depends_on:
       - localstack
       - postgres
@@ -32,7 +33,7 @@ services:
     networks:
       - mcp-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -53,13 +54,14 @@ services:
       - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET:-test}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - LOG_LEVEL=INFO
+      - MOCK_MODE=true
     depends_on:
       - postgres
       - redis
     networks:
       - mcp-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -78,6 +80,7 @@ services:
       - GCP_PROJECT_ID=${GCP_PROJECT_ID:-test-project}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - LOG_LEVEL=INFO
+      - MOCK_MODE=true
     volumes:
       - ./credentials:/app/credentials:ro
     depends_on:
@@ -86,7 +89,7 @@ services:
     networks:
       - mcp-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -94,7 +97,7 @@ services:
   # ===================
   # LangGraph Orchestrator
   # ===================
-  
+
   orchestrator:
     build:
       context: .
@@ -128,7 +131,7 @@ services:
     networks:
       - mcp-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -136,7 +139,7 @@ services:
   # ===================
   # Infrastructure Services
   # ===================
-  
+
   postgres:
     image: postgres:15-alpine
     container_name: postgres
@@ -152,7 +155,7 @@ services:
     networks:
       - mcp-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -168,7 +171,7 @@ services:
     networks:
       - mcp-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -176,13 +179,13 @@ services:
   # ===================
   # LocalStack (AWS Emulator)
   # ===================
-  
+
   localstack:
     image: localstack/localstack:latest
     container_name: localstack
     ports:
-      - "4566:4566"  # LocalStack edge port
-      - "4510-4559:4510-4559"  # Service ports
+      - "4566:4566" # LocalStack edge port
+      - "4510-4559:4510-4559" # Service ports
     environment:
       - SERVICES=ec2,s3,eks,iam,sagemaker,lambda,dynamodb,sqs,sns,cloudwatch,budgets
       - DEBUG=1
@@ -197,7 +200,7 @@ services:
   # ===================
   # Policy Engine (OPA)
   # ===================
-  
+
   opa:
     image: openpolicyagent/opa:latest
     container_name: opa
@@ -216,18 +219,18 @@ services:
   # ===================
   # Observability Stack
   # ===================
-  
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel-collector
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "8888:8888"   # Prometheus metrics
-      - "8889:8889"   # Prometheus exporter
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+      - "8888:8888" # Prometheus metrics
+      - "8889:8889" # Prometheus exporter
     volumes:
       - ./phase-0-foundations/observability/otel-collector-config.yaml:/etc/otel/config.yaml
-    command: ["--config", "/etc/otel/config.yaml"]
+    command: [ "--config", "/etc/otel/config.yaml" ]
     networks:
       - mcp-network
 
@@ -279,9 +282,9 @@ services:
     image: jaegertracing/all-in-one:latest
     container_name: jaeger
     ports:
-      - "16686:16686"  # UI
-      - "14268:14268"  # HTTP collector
-      - "14250:14250"  # gRPC collector
+      - "16686:16686" # UI
+      - "14268:14268" # HTTP collector
+      - "14250:14250" # gRPC collector
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     networks:
